@@ -1,5 +1,7 @@
 """Fake (in-memory) implementation of ItemRepository for testing."""
 
+from __future__ import annotations
+
 from datetime import datetime, timezone
 
 from app.domain.items import Item, ItemCreate, ItemUpdate
