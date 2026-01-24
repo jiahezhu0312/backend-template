@@ -292,6 +292,192 @@ Handled automatically by `get_db_session()` - commits on success, rollbacks on e
 
 ---
 
+## Typing Best Practices
+
+This project uses Python 3.10+ type hints. Follow these conventions:
+
+### Use Modern Syntax
+
+```python
+# ✅ DO: Modern union syntax (Python 3.10+)
+def get_item(item_id: str) -> Item | None:
+    ...
+
+# ❌ DON'T: Old Optional syntax
+from typing import Optional
+def get_item(item_id: str) -> Optional[Item]:
+    ...
+```
+
+```python
+# ✅ DO: Built-in generics (Python 3.9+)
+def list_items() -> list[Item]:
+    ...
+
+items: dict[str, Item] = {}
+result: tuple[bool, str | None] = (True, None)
+
+# ❌ DON'T: Import from typing
+from typing import List, Dict, Tuple
+def list_items() -> List[Item]:
+    ...
+```
+
+```python
+# ✅ DO: Use collections.abc for abstract types
+from collections.abc import Sequence, Mapping, AsyncGenerator
+
+async def get_items() -> AsyncGenerator[Item, None]:
+    ...
+
+# ❌ DON'T: Import from typing
+from typing import AsyncGenerator
+```
+
+### Always Annotate Return Types
+
+```python
+# ✅ DO: Explicit return types
+def calculate_total(prices: list[Decimal]) -> Decimal:
+    return sum(prices)
+
+async def create_item(data: ItemCreate) -> Item:
+    ...
+
+def __init__(self, repo: ItemRepository) -> None:
+    self.repo = repo
+
+# ❌ DON'T: Missing return types
+def calculate_total(prices: list[Decimal]):
+    return sum(prices)
+```
+
+### Use Annotated for Dependency Injection
+
+```python
+# ✅ DO: Annotated with Depends
+from typing import Annotated
+
+async def get_item(
+    item_id: str,
+    service: Annotated[ItemService, Depends(get_item_service)],
+) -> ItemResponse:
+    ...
+
+# ❌ DON'T: Depends without Annotated
+async def get_item(
+    item_id: str,
+    service: ItemService = Depends(get_item_service),
+) -> ItemResponse:
+    ...
+```
+
+### Abstract Methods
+
+```python
+# ✅ DO: Use ellipsis (...) for abstract method bodies
+class ItemRepository(ABC):
+    @abstractmethod
+    async def get(self, item_id: str) -> Item | None:
+        ...
+
+# ❌ DON'T: Use pass
+class ItemRepository(ABC):
+    @abstractmethod
+    async def get(self, item_id: str) -> Item | None:
+        pass
+```
+
+### Function Parameters
+
+```python
+# ✅ DO: Use keyword-only arguments for optional params
+async def list_items(*, skip: int = 0, limit: int = 100) -> list[Item]:
+    ...
+
+# ✅ DO: Type all parameters
+def validate_name(name: str, max_length: int = 255) -> bool:
+    ...
+
+# ❌ DON'T: Leave parameters untyped
+def validate_name(name, max_length=255):
+    ...
+```
+
+### Complex Types
+
+```python
+# ✅ DO: Use TypeAlias for complex types (if reused)
+from typing import TypeAlias
+
+ItemDict: TypeAlias = dict[str, Item]
+ValidationResult: TypeAlias = tuple[bool, str | None]
+
+# ✅ DO: Use TypedDict for dict structures with known keys
+from typing import TypedDict
+
+class PaginationParams(TypedDict):
+    skip: int
+    limit: int
+```
+
+### Callable Types
+
+```python
+# ✅ DO: Use Callable from collections.abc
+from collections.abc import Callable
+
+def retry(func: Callable[[], T], attempts: int = 3) -> T:
+    ...
+
+# ✅ DO: Use ParamSpec for decorators that preserve signatures
+from typing import ParamSpec, TypeVar
+
+P = ParamSpec("P")
+T = TypeVar("T")
+
+def log_calls(func: Callable[P, T]) -> Callable[P, T]:
+    ...
+```
+
+### Type Narrowing
+
+```python
+# ✅ DO: Use assertions or isinstance for type narrowing
+async def get_item_repository(
+    session: AsyncSession | None,
+) -> AsyncGenerator[ItemRepository, None]:
+    assert session is not None, "Database session required"
+    yield PostgresItemRepository(session)
+
+# ✅ DO: Check before using
+item = await service.get_item(item_id)
+if item is None:
+    raise HTTPException(status_code=404)
+return ItemResponse.model_validate(item)  # item is Item, not Item | None
+```
+
+### Avoid These Anti-Patterns
+
+```python
+# ❌ DON'T: Use Any unless absolutely necessary
+from typing import Any
+def process(data: Any) -> Any:
+    ...
+
+# ❌ DON'T: Use # type: ignore without explanation
+result = sketchy_function()  # type: ignore
+
+# ✅ DO: Explain if suppression is needed
+result = sketchy_function()  # type: ignore[arg-type]  # third-party lib issue
+
+# ❌ DON'T: Cast unnecessarily
+from typing import cast
+item = cast(Item, maybe_item)  # Avoid - use proper narrowing instead
+```
+
+---
+
 ## Checklist for New Features
 
 - [ ] Domain model in `domain/`
