@@ -460,6 +460,151 @@ item = cast(Item, maybe_item)  # Avoid - use proper narrowing instead
 
 ---
 
+## Logging
+
+This project uses **structlog** for structured logging with automatic context propagation.
+
+### Setup Overview
+
+- **Development**: Colored console output (human-readable)
+- **Production**: JSON output (machine-parseable, GCP-compatible)
+- **Context variables**: `request_id` is automatically attached to all logs via middleware
+
+Configure via environment variables:
+
+```bash
+LOG_LEVEL=INFO        # DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_FORMAT=console    # console (dev) or json (prod)
+```
+
+### Getting a Logger
+
+```python
+from app.infrastructure.logging import get_logger
+
+logger = get_logger(__name__)
+```
+
+### Logging Best Practices
+
+#### Use Structured Fields (Not String Interpolation)
+
+```python
+# ✅ DO: Pass data as keyword arguments
+logger.info("item_created", item_id=item.id, name=item.name)
+
+# ❌ DON'T: Interpolate strings
+logger.info(f"Created item {item.id} with name {item.name}")
+```
+
+#### Use Snake_Case Event Names
+
+```python
+# ✅ DO: Descriptive event names
+logger.info("payment_processed", amount=100, currency="USD")
+logger.warning("rate_limit_exceeded", user_id=user_id)
+logger.error("external_api_failed", service="stripe", status_code=500)
+
+# ❌ DON'T: Sentence-style messages
+logger.info("Payment was processed successfully")
+```
+
+#### Log at the Right Level
+
+| Level | Use For | Example |
+|-------|---------|---------|
+| `DEBUG` | Detailed diagnostics (dev only) | Cache hits, SQL queries |
+| `INFO` | Normal operations | `item_created`, `user_logged_in` |
+| `WARNING` | Recoverable issues | Slow queries, retry attempts |
+| `ERROR` | Failures needing attention | External API failures |
+| `CRITICAL` | System unusable | Database connection lost |
+
+#### Log in Services (Not Routes or Repositories)
+
+```python
+# ✅ DO: Log business events in services
+class ItemService:
+    async def create_item(self, data: ItemCreate) -> Item:
+        item = await self.items.create(item_id, data)
+        logger.info("item_created", item_id=item_id, name=data.name)
+        return item
+
+    async def delete_item(self, item_id: str) -> bool:
+        deleted = await self.items.delete(item_id)
+        if deleted:
+            logger.info("item_deleted", item_id=item_id)
+        return deleted
+
+# ❌ DON'T: Log in routes (they should be thin)
+@router.post("")
+async def create_item(request: CreateItemRequest, service: ItemService):
+    logger.info("creating item...")  # Don't do this
+    return await service.create_item(...)
+```
+
+#### Log Errors with Context
+
+```python
+# ✅ DO: Include relevant context
+try:
+    result = await external_api.call(payload)
+except ExternalAPIError as e:
+    logger.error(
+        "external_api_failed",
+        service="payment_gateway",
+        error=str(e),
+        payload_id=payload.id,
+    )
+    raise
+
+# ✅ DO: Use logger.exception() for stack traces
+try:
+    process_data(data)
+except Exception:
+    logger.exception("data_processing_failed", data_id=data.id)
+    raise
+```
+
+#### What to Log vs What Not to Log
+
+```python
+# ✅ DO: Log these
+logger.info("application_startup", env=settings.env, version="1.0.0")
+logger.info("user_registered", user_id=user.id)
+logger.info("order_completed", order_id=order.id, total=order.total)
+logger.warning("slow_query", duration_ms=150, query_type="list_items")
+
+# ❌ DON'T: Log sensitive data
+logger.info("user_login", password=password)           # Never log passwords
+logger.info("payment", credit_card=card_number)        # Never log card numbers
+logger.info("request", headers=dict(request.headers))  # May contain auth tokens
+```
+
+### Request Context
+
+The middleware automatically binds `request_id` to all logs during a request:
+
+```python
+# All logs within a request automatically include request_id
+logger.info("item_created", item_id="123")
+# Output: {"event": "item_created", "item_id": "123", "request_id": "abc-456", ...}
+```
+
+You can bind additional context for a request scope:
+
+```python
+from structlog.contextvars import bind_contextvars
+
+# In a route or middleware
+bind_contextvars(user_id=current_user.id)
+
+# All subsequent logs in this request will include user_id
+logger.info("item_created", item_id="123")
+# Output: {"event": "item_created", "item_id": "123", "user_id": "user-789", ...}
+```
+
+---
+
 ## Checklist for New Features
 
 - [ ] Domain model in `domain/`
