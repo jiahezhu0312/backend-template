@@ -22,7 +22,10 @@ This codebase follows a **layered architecture** with clear separation of concer
 
 **Quick links:**
 
+- [Implementing from OpenAPI](#practical-guide-implementing-from-openapi-contract) — simple vs complex scenarios
 - [Adding a Feature](#adding-a-new-feature) — step-by-step guide
+- [When to Skip Layers](#when-to-skip-layers-pragmatic-shortcuts) — simplify when appropriate
+- [FastAPI Parameter Types](#fastapi-parameter-types) — Path, Query, Field, Header
 - [Rules by Layer](#rules-by-layer) — do's and don'ts
 - [Exception Handling](#exception-handling) — error patterns
 - [Logging](#logging) — structured logging guide
@@ -42,6 +45,255 @@ src/app/
 ├── dependencies/   # DI wiring (per-feature)
 └── infrastructure/ # Logging, external clients
 ```
+
+---
+
+## Practical Guide: Implementing from OpenAPI Contract
+
+You've received a new OpenAPI spec with endpoints to implement. Here's how to approach it.
+
+### Simple Scenario: Add a Single Read Endpoint
+
+**Contract says:** `GET /products/{product_id}` returns product details.
+
+**Step 1: Create the schema (match the contract)**
+
+```python
+# schema/products.py
+from pydantic import BaseModel
+
+class ProductResponse(BaseModel):
+    id: str
+    name: str
+    price: float
+    in_stock: bool
+```
+
+**Step 2: Create the route**
+
+```python
+# routes/products.py
+from typing import Annotated
+from fastapi import APIRouter, Depends, Path
+
+router = APIRouter(prefix="/products", tags=["products"])
+
+@router.get("/{product_id}", response_model=ProductResponse)
+async def get_product(
+    product_id: Annotated[str, Path()],
+    repo: Annotated[ProductRepository, Depends(get_product_repo)],
+) -> ProductResponse:
+    product = await repo.get(product_id)
+    if product is None:
+        raise NotFoundError("Product", product_id)
+    return ProductResponse.model_validate(product)
+```
+
+**Step 3: Create minimal repository**
+
+```python
+# repositories/products.py (single file is fine for simple cases)
+from abc import ABC, abstractmethod
+
+class ProductRepository(ABC):
+    @abstractmethod
+    async def get(self, product_id: str) -> Product | None: ...
+
+class FakeProductRepository(ProductRepository):
+    async def get(self, product_id: str) -> Product | None:
+        # TODO: Replace with real implementation
+        return None
+```
+
+**Step 4: Wire it up**
+
+```python
+# dependencies/products.py
+def get_product_repo() -> ProductRepository:
+    return FakeProductRepository()
+```
+
+```python
+# main.py
+from app.routes.products import router as products_router
+app.include_router(products_router)
+```
+
+**That's it.** No service layer needed for a simple lookup. Total: 4 files touched.
+
+---
+
+### Complex Scenario: Add a Feature with Business Logic
+
+**Contract says:**
+- `POST /orders` — create order (must validate inventory, calculate totals)
+- `GET /orders/{order_id}` — get order details
+- `POST /orders/{order_id}/cancel` — cancel order (only if not shipped)
+
+This has business logic (validation, calculations, state transitions), so use the full structure.
+
+**Step 1: Analyze what you need**
+
+- Business rules: inventory check, total calculation, cancellation rules
+- Multiple endpoints sharing logic → needs a service
+- Data storage → needs a repository
+
+**Step 2: Start with schema (from the contract)**
+
+```python
+# schema/orders.py
+from pydantic import BaseModel, Field
+from decimal import Decimal
+
+class OrderItemRequest(BaseModel):
+    product_id: str
+    quantity: int = Field(gt=0)
+
+class CreateOrderRequest(BaseModel):
+    items: list[OrderItemRequest] = Field(min_length=1)
+    shipping_address: str
+
+class OrderResponse(BaseModel):
+    id: str
+    status: str
+    items: list[OrderItemResponse]
+    total: Decimal
+    created_at: datetime
+```
+
+**Step 3: Create domain models (internal representation)**
+
+```python
+# domain/orders.py
+from pydantic import BaseModel
+from decimal import Decimal
+from datetime import datetime
+from enum import Enum
+
+class OrderStatus(str, Enum):
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    SHIPPED = "shipped"
+    CANCELLED = "cancelled"
+
+class Order(BaseModel):
+    id: str
+    status: OrderStatus
+    items: list[OrderItem]
+    total: Decimal
+    created_at: datetime
+
+class OrderCreate(BaseModel):
+    items: list[OrderItemCreate]
+    shipping_address: str
+```
+
+**Step 4: Create repository interface**
+
+```python
+# repositories/orders/interface.py
+from abc import ABC, abstractmethod
+
+class OrderRepository(ABC):
+    @abstractmethod
+    async def get(self, order_id: str) -> Order | None: ...
+    
+    @abstractmethod
+    async def create(self, order_id: str, data: OrderCreate) -> Order: ...
+    
+    @abstractmethod
+    async def update_status(self, order_id: str, status: OrderStatus) -> Order | None: ...
+```
+
+**Step 5: Create service with business logic**
+
+```python
+# services/orders/service.py
+class OrderService:
+    def __init__(
+        self,
+        orders: OrderRepository,
+        products: ProductRepository,  # Need to check inventory
+    ) -> None:
+        self.orders = orders
+        self.products = products
+
+    async def create_order(self, data: OrderCreate) -> Order:
+        # Business logic: validate inventory
+        for item in data.items:
+            product = await self.products.get(item.product_id)
+            if product is None:
+                raise NotFoundError("Product", item.product_id)
+            if product.stock < item.quantity:
+                raise ValidationError(f"Insufficient stock for {product.name}")
+        
+        # Business logic: calculate total
+        total = calculate_order_total(data.items, products)
+        
+        order_id = str(uuid.uuid4())
+        return await self.orders.create(order_id, data, total)
+
+    async def cancel_order(self, order_id: str) -> Order:
+        order = await self.orders.get(order_id)
+        if order is None:
+            raise NotFoundError("Order", order_id)
+        
+        # Business logic: can only cancel if not shipped
+        if order.status == OrderStatus.SHIPPED:
+            raise ValidationError("Cannot cancel shipped order")
+        
+        return await self.orders.update_status(order_id, OrderStatus.CANCELLED)
+```
+
+```python
+# services/orders/logic.py (pure functions)
+def calculate_order_total(items: list[OrderItem], products: dict[str, Product]) -> Decimal:
+    total = Decimal("0")
+    for item in items:
+        product = products[item.product_id]
+        total += product.price * item.quantity
+    return total
+```
+
+**Step 6: Create thin routes**
+
+```python
+# routes/orders.py
+@router.post("", response_model=OrderResponse, status_code=201)
+async def create_order(
+    request: CreateOrderRequest,
+    service: Annotated[OrderService, Depends(get_order_service)],
+) -> OrderResponse:
+    data = OrderCreate(**request.model_dump())
+    order = await service.create_order(data)
+    return OrderResponse.model_validate(order)
+
+@router.post("/{order_id}/cancel", response_model=OrderResponse)
+async def cancel_order(
+    order_id: Annotated[str, Path()],
+    service: Annotated[OrderService, Depends(get_order_service)],
+) -> OrderResponse:
+    order = await service.cancel_order(order_id)
+    return OrderResponse.model_validate(order)
+```
+
+**Step 7: Wire dependencies and register router**
+
+---
+
+### Decision Checklist: Simple vs Complex
+
+Before you start, ask yourself:
+
+| Question | If Yes → |
+|----------|----------|
+| Is it just fetching/storing data with no rules? | Simple (skip service) |
+| Are there business rules to enforce? | Complex (use service) |
+| Do multiple endpoints share logic? | Complex (use service) |
+| Does it need to coordinate multiple repositories? | Complex (use service) |
+| Will the logic need unit testing in isolation? | Complex (use service + logic.py) |
+
+**Start simple.** If you find yourself adding `if` statements and validation in the route, that's your signal to introduce a service.
 
 ---
 
@@ -166,6 +418,206 @@ Add to `src/app/main.py`:
 from app.routes.users import router as users_router
 app.include_router(users_router)
 ```
+
+---
+
+## When to Skip Layers (Pragmatic Shortcuts)
+
+The full architecture (domain → schema → repository → service → route → dependencies) is designed for complex features. **Not every feature needs all layers.** Here's when to simplify:
+
+### Skip `logic.py` for Simple Services
+
+Only create a separate `logic.py` when you have pure functions worth isolating (calculations, transformations, validation logic). For basic CRUD, just use `service.py`.
+
+```
+# Full structure (complex feature with business rules)
+services/orders/
+├── __init__.py
+├── service.py      # Orchestration
+└── logic.py        # Price calculations, discount rules, etc.
+
+# Simplified (basic CRUD)
+services/users/
+├── __init__.py
+└── service.py      # Everything here is fine
+```
+
+### Combine Domain and Schema When Identical
+
+If your domain model and API schema have the same fields, you don't need both. The separation exists for when they diverge.
+
+```python
+# ❌ Unnecessary duplication
+# domain/users.py
+class User(BaseModel):
+    id: str
+    email: str
+    name: str
+
+# schema/users.py  
+class UserResponse(BaseModel):  # Identical to domain model
+    id: str
+    email: str
+    name: str
+
+# ✅ Just use one (in schema/) and import it where needed
+# schema/users.py
+class User(BaseModel):
+    id: str
+    email: str
+    name: str
+
+class UserResponse(User):  # Or just use User directly as response
+    pass
+```
+
+**When to separate them:**
+- API uses different field names (`user_id` vs `id`)
+- API excludes internal fields (`password_hash`, `internal_notes`)
+- Different validation rules for API vs internal use
+
+### Skip Service Layer for Trivial Endpoints
+
+For simple read-only endpoints with no business logic, calling the repository directly from the route is acceptable.
+
+```python
+# ✅ OK for trivial cases - health check, simple lookups
+@router.get("/config")
+async def get_config(repo: Annotated[ConfigRepository, Depends(get_config_repo)]) -> ConfigResponse:
+    config = await repo.get_current()
+    return ConfigResponse.model_validate(config)
+
+# ❌ Still use services when there's any logic
+@router.get("/{item_id}")
+async def get_item(item_id: str, repo: ItemRepository) -> ItemResponse:
+    item = await repo.get(item_id)
+    if item is None:  # This check belongs in a service
+        raise HTTPException(404)
+    return ItemResponse.model_validate(item)
+```
+
+### Decision Guide
+
+| Situation | Recommendation |
+|-----------|----------------|
+| Simple CRUD, no business rules | Skip `logic.py`, consider skipping service |
+| Domain model = API schema | Use one model, put in `schema/` |
+| Complex calculations/validation | Use full structure with `logic.py` |
+| Multiple consumers of same logic | Use full structure (services are reusable) |
+| Need to swap storage backends | Always use repository interface |
+
+**Remember:** Start simple, add layers when you feel the pain of not having them. It's easier to add structure than to remove it.
+
+---
+
+## FastAPI Parameter Types
+
+Understanding when to use `Path`, `Query`, `Field`, `Body`, and `Header`.
+
+### Quick Reference
+
+| Data Location | FastAPI Type | Example URL/Body |
+|---------------|--------------|------------------|
+| URL path segment | `Path()` | `/items/{item_id}` |
+| Query string | `Query()` | `/items?skip=0&limit=10` |
+| Request body (JSON) | Pydantic model + `Field()` | `{"name": "Test"}` |
+| HTTP headers | `Header()` | `X-Request-ID: abc123` |
+
+### Path Parameters
+
+Use for resource identifiers in the URL path.
+
+```python
+from fastapi import Path
+
+@router.get("/{item_id}")
+async def get_item(
+    item_id: Annotated[str, Path(description="The item's unique identifier")],
+) -> ItemResponse:
+    ...
+
+# With validation
+@router.get("/{item_id}")
+async def get_item(
+    item_id: Annotated[str, Path(min_length=1, max_length=36)],
+) -> ItemResponse:
+    ...
+```
+
+### Query Parameters
+
+Use for optional filters, pagination, sorting.
+
+```python
+from fastapi import Query
+
+@router.get("")
+async def list_items(
+    skip: Annotated[int, Query(ge=0, description="Items to skip")] = 0,
+    limit: Annotated[int, Query(ge=1, le=100, description="Max items to return")] = 20,
+    search: Annotated[str | None, Query(max_length=100)] = None,
+) -> ItemListResponse:
+    ...
+```
+
+### Request Body (Pydantic Models)
+
+Use `Field()` inside Pydantic models for body validation.
+
+```python
+from pydantic import BaseModel, Field
+
+class CreateItemRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255, description="Item name")
+    description: str | None = Field(default=None, max_length=1000)
+    price: Decimal = Field(gt=0, description="Price must be positive")
+    tags: list[str] = Field(default_factory=list, max_length=10)
+
+@router.post("")
+async def create_item(request: CreateItemRequest) -> ItemResponse:
+    ...
+```
+
+### Headers
+
+Use for metadata like authentication, request tracing.
+
+```python
+from fastapi import Header
+
+@router.get("")
+async def list_items(
+    x_request_id: Annotated[str | None, Header()] = None,
+    authorization: Annotated[str | None, Header()] = None,
+) -> ItemListResponse:
+    ...
+```
+
+### Common Patterns
+
+```python
+# Combining path + query + body
+@router.patch("/{item_id}")
+async def update_item(
+    item_id: Annotated[str, Path()],                    # From URL path
+    dry_run: Annotated[bool, Query()] = False,          # From query string
+    request: UpdateItemRequest,                          # From JSON body
+    service: Annotated[ItemService, Depends(get_item_service)],
+) -> ItemResponse:
+    if dry_run:
+        return await service.preview_update(item_id, request)
+    return await service.update_item(item_id, request)
+```
+
+### When to Use What
+
+| I want to... | Use |
+|--------------|-----|
+| Identify a specific resource | `Path()` — `/users/{user_id}` |
+| Filter or paginate a list | `Query()` — `?status=active&page=2` |
+| Send structured data to create/update | Pydantic model (body) |
+| Send metadata about the request | `Header()` |
+| Send a single value in the body | `Body()` — rarely needed |
 
 ---
 
