@@ -1,7 +1,7 @@
 """Application exception hierarchy.
 
 Define domain exceptions here. Routes map these to HTTP responses.
-Services should raise these exceptions, not HTTP exceptions.
+Services and repositories should raise these exceptions, not HTTP exceptions.
 
 Exception → HTTP mapping (defined in main.py):
     AuthenticationError  → 401 Unauthorized

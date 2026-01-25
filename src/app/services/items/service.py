@@ -8,7 +8,7 @@ import uuid
 
 from app.domain.items import Item, ItemCreate, ItemUpdate
 from app.repositories.items import ItemRepository
-from app.services.exceptions import NotFoundError
+from app.exceptions import NotFoundError
 
 
 class ItemService:

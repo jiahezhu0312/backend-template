@@ -11,8 +11,7 @@ from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from app.config import get_settings
 from app.infrastructure.logging import configure_logging, get_logger
-from app.routes import health_router, items_router
-from app.services import (
+from app.exceptions import (
     AppException,
     AuthenticationError,
     AuthorizationError,
@@ -26,6 +25,7 @@ from app.services import (
     TimeoutError,
     ValidationError,
 )
+from app.routes import health_router, items_router
 
 settings = get_settings()
 configure_logging()
@@ -129,7 +129,7 @@ async def validation_error_handler(request: Request, exc: ValidationError) -> JS
 @app.exception_handler(RateLimitError)
 async def rate_limit_handler(request: Request, exc: RateLimitError) -> JSONResponse:
     """Handle RateLimitError exceptions."""
-    headers = {}
+    headers: dict[str, str] = {}
     if exc.retry_after:
         headers["Retry-After"] = str(exc.retry_after)
     return JSONResponse(status_code=429, content={"detail": exc.message}, headers=headers)
@@ -171,7 +171,7 @@ async def service_unavailable_handler(
 ) -> JSONResponse:
     """Handle ServiceUnavailableError exceptions."""
     logger.warning("service_unavailable", message=exc.message)
-    headers = {}
+    headers: dict[str, str] = {}
     if exc.retry_after:
         headers["Retry-After"] = str(exc.retry_after)
     return JSONResponse(
