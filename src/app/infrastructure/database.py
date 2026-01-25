@@ -1,18 +1,15 @@
 """Database connection and session management."""
 
 from collections.abc import AsyncGenerator
-from typing import Annotated
 
-from fastapi import Depends
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
 
-from app.config import Settings, get_settings
+from app.config import get_settings
 
-# Lazy initialization - only create engine/factory when actually needed
 _engine = None
 _async_session_factory = None
 
@@ -42,27 +39,15 @@ def _get_session_factory():
     return _async_session_factory
 
 
-async def get_db_session(
-    settings: Annotated[Settings, Depends(get_settings)],
-) -> AsyncGenerator[AsyncSession | None, None]:
-    """Get the database session based on environment.
-
-    When running in test mode we skip database connection entirely since
-    fake repositories don't need a real session. In production we provide
-    a properly managed async session with automatic commit/rollback.
-    """
-    if settings.is_test:
-        # Test mode: no database session needed (fake repos handle storage)
-        yield None
-    else:
-        # Production: provide real database session
-        async with _get_session_factory()() as session:
-            try:
-                yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
+async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
+    """Provide a database session with automatic commit/rollback."""
+    async with _get_session_factory()() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 
 def reset_database() -> None:

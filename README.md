@@ -7,8 +7,7 @@ A layered FastAPI backend template with testable architecture, using uv for pack
 - **Layered Architecture**: Domain models, Services, Repositories, Routes
 - **Dependency Injection**: Swap real implementations for fakes in tests
 - **Pydantic Everywhere**: Runtime validation at all layers (TypeScript-style)
-- **Async PostgreSQL**: SQLAlchemy 2.0 with asyncpg
-- **Alembic Migrations**: Async-compatible database migrations
+- **PostgreSQL + Alembic**: Async database with migrations
 - **Structured Logging**: JSON logs in production with structlog
 - **Docker Ready**: Multi-stage Dockerfile + docker-compose
 
@@ -22,7 +21,6 @@ src/app/
 ├── domain/
 │   └── items.py         # Pydantic domain models (internal)
 ├── schema/
-│   ├── health.py        # Health check schemas
 │   └── items.py         # Item request/response schemas
 ├── services/
 │   └── items/
@@ -32,63 +30,93 @@ src/app/
 │   └── items/
 │       ├── interface.py # Abstract interface
 │       ├── postgres.py  # PostgreSQL implementation
-│       └── fake.py      # In-memory for testing
+│       └── fake.py      # In-memory (for tests)
 ├── infrastructure/
 │   ├── database.py      # SQLAlchemy async setup
-│   ├── orm.py           # ORM models (separate from domain)
+│   ├── orm.py           # ORM models
 │   └── logging.py       # structlog configuration
 └── routes/
-    ├── health.py        # Health check endpoint
-    └── items.py         # Example CRUD routes
+    └── items.py         # CRUD routes
 ```
 
 ## Quick Start
 
-### Prerequisites
-
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) package manager
-- Docker (for PostgreSQL)
-
-### Setup
-
-1. **Create environment file**
+### Option 1: With Docker
 
 ```bash
-# Create .env with these values:
-ENV=local
-DEBUG=true
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/app
-LOG_LEVEL=INFO
-LOG_FORMAT=console
+# Start app + database
+docker compose up --build -d
+
+# Run migrations to create tables
+docker compose exec app alembic revision --autogenerate -m "initial"
+docker compose exec app alembic upgrade head
+
+# View logs
+docker compose logs -f
 ```
 
-2. **Install dependencies**
+Open http://localhost:8000/docs to use the API.
+
+### Option 2: Local Development (without Docker)
+
+Prerequisites: Python 3.12+, [uv](https://docs.astral.sh/uv/), PostgreSQL running locally
 
 ```bash
+# Install dependencies
 uv sync
-```
 
-3. **Start PostgreSQL**
+# Create .env file
+echo "DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/app" > .env
 
-```bash
-docker compose up -d db
-```
-
-4. **Run migrations**
-
-```bash
+# Run migrations
 uv run alembic revision --autogenerate -m "initial"
 uv run alembic upgrade head
-```
 
-5. **Start the server**
-
-```bash
+# Start server
 uv run uvicorn app.main:app --reload
 ```
 
-6. **Open API docs**: http://localhost:8000/docs
+## Database Migrations
+
+This template uses **Alembic** to manage database schema changes.
+
+### Why Migrations?
+
+When you use a real database, tables don't create themselves. Migrations:
+1. Generate SQL to create/modify tables based on your ORM models
+2. Track which changes have been applied
+3. Allow rolling back changes if needed
+
+### Common Commands
+
+```bash
+# Generate a new migration (after changing ORM models)
+alembic revision --autogenerate -m "description of change"
+
+# Apply all pending migrations
+alembic upgrade head
+
+# Rollback last migration
+alembic downgrade -1
+
+# View migration history
+alembic history
+```
+
+With Docker, prefix commands with `docker compose exec app`:
+```bash
+docker compose exec app alembic upgrade head
+```
+
+## Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ENV` | Environment (local, test, staging, production) | `local` |
+| `DEBUG` | Enable debug mode | `false` |
+| `DATABASE_URL` | PostgreSQL connection string | `postgresql+asyncpg://postgres:postgres@localhost:5432/app` |
+| `LOG_LEVEL` | Logging level | `INFO` |
+| `LOG_FORMAT` | Log format (console, json) | `console` |
 
 ## Development
 
@@ -102,41 +130,9 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for the full developer guide.
 | Add internal business models | `domain/` |
 | Add calculations/rules | `services/*/logic.py` |
 | Coordinate operations | `services/*/service.py` |
-| Read/write database | `repositories/` |
+| Add database table | `infrastructure/orm.py` + migration |
+| Read/write data | `repositories/` |
 | Handle HTTP requests | `routes/` |
-
-### Running with Docker
-
-```bash
-# Database only (run app locally)
-docker compose up -d db
-
-# Everything
-docker compose up
-```
-
-### Migrations
-
-```bash
-# Generate migration
-uv run alembic revision --autogenerate -m "description"
-
-# Apply
-uv run alembic upgrade head
-
-# Rollback
-uv run alembic downgrade -1
-```
-
-## Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `ENV` | Environment (local, test, staging, production) | `local` |
-| `DEBUG` | Enable debug mode | `false` |
-| `DATABASE_URL` | PostgreSQL connection string | (required) |
-| `LOG_LEVEL` | Logging level | `INFO` |
-| `LOG_FORMAT` | Log format (console, json) | `console` |
 
 ## Architecture
 
@@ -155,29 +151,6 @@ Response ← Schema ← Service
 | **Repositories** | Data access abstraction |
 | **Infrastructure** | Database, logging, external clients |
 
-## Response Shape
-
-Keep error responses consistent:
-
-```json
-{ "detail": "Human-readable message" }
-```
-
-For unexpected failures, the app returns `500` with `{ "detail": "Internal Server Error" }`.
-
-## Production Checklist (minimal)
-
-- Set `ENV=production` and `LOG_FORMAT=json`.
-- Provide a strong `DATABASE_URL`.
-- Review CORS and allowed hosts for your deployment environment.
-- Run migrations before deploying.
-
-## Cloud Run Logging
-
-Cloud Run expects a `severity` field in JSON logs. This template maps `level`
-to `severity` and adds a `message` field so ERROR logs show with the correct
-severity in Cloud Logging.
-
 ## API Endpoints
 
 | Method | Endpoint | Description |
@@ -189,6 +162,13 @@ severity in Cloud Logging.
 | POST | `/items` | Create item |
 | PATCH | `/items/{id}` | Update item |
 | DELETE | `/items/{id}` | Delete item |
+
+## Production Checklist
+
+- Set `ENV=production` and `LOG_FORMAT=json`
+- Use a managed PostgreSQL instance
+- Run `alembic upgrade head` before deploying new code
+- Review CORS and allowed hosts
 
 ## License
 

@@ -1,8 +1,4 @@
-"""SQLAlchemy ORM base and models.
-
-ORM models are separate from domain models to keep business logic
-decoupled from database concerns.
-"""
+"""SQLAlchemy ORM models (separate from domain models)."""
 
 from datetime import datetime
 
@@ -32,13 +28,8 @@ class TimestampMixin:
     )
 
 
-# ─────────────────────────────────────────────────────────────
-# Example ORM model (placeholder)
-# ─────────────────────────────────────────────────────────────
-
-
 class ItemORM(TimestampMixin, Base):
-    """Example ORM model for items."""
+    """ORM model for items table."""
 
     __tablename__ = "items"
 

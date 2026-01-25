@@ -45,19 +45,16 @@ def reset_test_repositories() -> None:
 
 async def get_item_repository(
     settings: Annotated[Settings, Depends(get_settings)],
-    session: Annotated[AsyncSession | None, Depends(get_db_session)],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> AsyncGenerator[ItemRepository, None]:
     """Get the item repository based on environment.
 
-    When running in test mode we want a single in-memory repository instance
-    so calls that happen across multiple requests (create then list) operate
-    on the same backing store. In production we instantiate the
-    PostgresItemRepository per-request with the DB session.
+    When running in test mode we use a single in-memory repository instance.
+    In production we use PostgresItemRepository with the DB session.
     """
     if settings.is_test:
         yield _get_test_item_repository()
     else:
-        assert session is not None, "Database session required in production"
         yield PostgresItemRepository(session)
 
 

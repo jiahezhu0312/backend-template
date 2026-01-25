@@ -32,7 +32,9 @@ class PostgresItemRepository(ItemRepository):
 
     async def count(self) -> int:
         """Count total items."""
-        result = await self.session.execute(select(func.count()).select_from(ItemORM))
+        result = await self.session.execute(
+            select(func.count()).select_from(ItemORM)
+        )
         return int(result.scalar_one())
 
     async def create(self, item_id: str, data: ItemCreate) -> Item:

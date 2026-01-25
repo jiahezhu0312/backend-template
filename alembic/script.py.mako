@@ -3,8 +3,8 @@
 Revision ID: ${up_revision}
 Revises: ${down_revision | comma,n}
 Create Date: ${create_date}
-"""
 
+"""
 from typing import Sequence, Union
 
 from alembic import op
@@ -19,10 +19,8 @@ depends_on: Union[str, Sequence[str], None] = ${repr(depends_on)}
 
 
 def upgrade() -> None:
-    """Upgrade database schema."""
     ${upgrades if upgrades else "pass"}
 
 
 def downgrade() -> None:
-    """Downgrade database schema."""
     ${downgrades if downgrades else "pass"}

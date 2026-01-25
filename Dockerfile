@@ -14,11 +14,11 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 FROM base AS dependencies
 
 # Copy dependency files
-COPY pyproject.toml uv.lock* ./
+COPY pyproject.toml ./
 
 # Install dependencies
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev
+    uv sync --no-install-project --no-dev
 
 # ─────────────────────────────────────────────────────────────
 FROM base AS runtime
@@ -31,12 +31,13 @@ RUN addgroup --system --gid 1001 appgroup && \
 COPY --from=dependencies /app/.venv /app/.venv
 
 # Copy application code
-COPY --chown=appuser:appgroup src/ ./src/
-COPY --chown=appuser:appgroup alembic/ ./alembic/
+COPY --chown=appuser:appgroup src/app ./app/
+COPY --chown=appuser:appgroup alembic ./alembic/
 COPY --chown=appuser:appgroup alembic.ini ./
 
-# Set PATH to use virtual environment
+# Set PATH to use virtual environment and PYTHONPATH for imports
 ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH="/app"
 
 USER appuser
 

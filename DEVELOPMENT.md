@@ -71,12 +71,6 @@ class UserRepository(ABC):
     @abstractmethod
     async def create(self, user_id: str, data: UserCreate) -> User: ...
 
-# postgres.py
-class PostgresUserRepository(UserRepository):
-    def __init__(self, session: AsyncSession):
-        self.session = session
-    # ... implement methods
-
 # fake.py
 class FakeUserRepository(UserRepository):
     def __init__(self):
@@ -150,8 +144,8 @@ async def get_item(id: str, service: ItemService):
 
 # ❌ DON'T: Put logic in routes
 @router.get("/{id}")
-async def get_item(id: str, db: Session):
-    item = db.query(Item).filter_by(id=id).first()
+async def get_item(id: str, repo: ItemRepository):
+    item = await repo.get(id)
     if item.price > 100:  # Business logic doesn't belong here
         item.discount = 0.1
     return item
@@ -167,7 +161,7 @@ class ItemService:
 
 # ❌ DON'T: Depend on concrete implementations
 class ItemService:
-    def __init__(self, items: PostgresItemRepository):  # Concrete type
+    def __init__(self, items: FakeItemRepository):  # Concrete type
         self.items = items
 ```
 
@@ -180,9 +174,9 @@ def calculate_discount(price: Decimal, quantity: int) -> Decimal:
         return price * Decimal("0.1")
     return Decimal("0")
 
-# ❌ DON'T: Access database or external services
-def calculate_discount(price: Decimal, db: Session) -> Decimal:
-    settings = db.query(Settings).first()  # Side effect!
+# ❌ DON'T: Access external services
+def calculate_discount(price: Decimal, api: ExternalAPI) -> Decimal:
+    settings = api.get_settings()  # Side effect!
     return price * settings.discount_rate
 ```
 
@@ -210,7 +204,7 @@ class DataRepository(ABC):
 | Represent internal data | `domain/` (Pydantic) |
 | Calculate/transform data | `services/*/logic.py` (pure functions) |
 | Coordinate operations | `services/*/service.py` (service class) |
-| Read/write database | `repositories/` |
+| Read/write data | `repositories/` |
 | Handle HTTP | `routes/` |
 
 ---
@@ -222,7 +216,6 @@ class DataRepository(ABC):
 | Pure functions | Direct call, no setup |
 | Services | Inject `FakeRepository` |
 | Routes | `TestClient` + fake dependencies |
-| Repositories | Integration test with real DB |
 
 ```python
 # Testing pure functions (instant)
@@ -285,10 +278,6 @@ from app.common import normalize_pagination, utc_now
 skip, limit = normalize_pagination(skip=skip, limit=limit)
 created_at = utc_now()
 ```
-
-### Database transactions
-
-Handled automatically by `get_db_session()` - commits on success, rollbacks on error.
 
 ---
 
@@ -443,13 +432,6 @@ def log_calls(func: Callable[P, T]) -> Callable[P, T]:
 ### Type Narrowing
 
 ```python
-# ✅ DO: Use assertions or isinstance for type narrowing
-async def get_item_repository(
-    session: AsyncSession | None,
-) -> AsyncGenerator[ItemRepository, None]:
-    assert session is not None, "Database session required"
-    yield PostgresItemRepository(session)
-
 # ✅ DO: Check before using
 item = await service.get_item(item_id)
 if item is None:
@@ -482,10 +464,10 @@ item = cast(Item, maybe_item)  # Avoid - use proper narrowing instead
 
 - [ ] Domain model in `domain/`
 - [ ] Schema in `schema/`
+- [ ] ORM model in `infrastructure/orm.py`
 - [ ] Repository interface + implementations in `repositories/`
 - [ ] Service in `services/`
 - [ ] Route in `routes/`
 - [ ] Dependencies wired in `dependencies.py`
 - [ ] Router registered in `main.py`
-- [ ] ORM model in `infrastructure/orm.py` (if new table)
-- [ ] Migration created with `alembic revision --autogenerate`
+- [ ] Migration: `alembic revision --autogenerate -m "add feature"`

@@ -20,7 +20,7 @@ def _add_gcp_fields(
     if "message" not in event_dict and "event" in event_dict:
         event_dict["message"] = event_dict["event"]
     return event_dict
-
+                                                                                                
 
 def configure_logging() -> None:
     """Configure structlog for the application."""
