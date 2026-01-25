@@ -18,15 +18,15 @@ def calculate_item_price(
     discount_percent: Decimal = Decimal("0"),
 ) -> Decimal:
     """Calculate total price for an item.
-    
+
     Args:
         base_price: Price per unit
         quantity: Number of units
         discount_percent: Discount as decimal (0.15 = 15%)
-    
+
     Returns:
         Total price after discount, rounded to 2 decimal places
-    
+
     Example:
         >>> calculate_item_price(Decimal("100"), 2, Decimal("0.10"))
         Decimal('180.00')
@@ -38,18 +38,18 @@ def calculate_item_price(
 
 def apply_bulk_discount(quantity: int) -> Decimal:
     """Determine discount based on quantity.
-    
+
     Business rules:
     - 10+ items: 5% discount
     - 50+ items: 10% discount
     - 100+ items: 15% discount
-    
+
     Args:
         quantity: Number of items
-    
+
     Returns:
         Discount as decimal (0.05 = 5%)
-    
+
     Example:
         >>> apply_bulk_discount(75)
         Decimal('0.10')
@@ -65,18 +65,18 @@ def apply_bulk_discount(quantity: int) -> Decimal:
 
 def validate_item_name(name: str) -> tuple[bool, str | None]:
     """Validate an item name.
-    
+
     Business rules:
     - Must not be empty
     - Must not exceed 255 characters
     - Must not contain special characters
-    
+
     Args:
         name: The item name to validate
-    
+
     Returns:
         Tuple of (is_valid, error_message)
-    
+
     Example:
         >>> validate_item_name("")
         (False, "Name cannot be empty")
@@ -85,9 +85,9 @@ def validate_item_name(name: str) -> tuple[bool, str | None]:
     """
     if not name or not name.strip():
         return False, "Name cannot be empty"
-    
+
     if len(name) > 255:
         return False, "Name cannot exceed 255 characters"
-    
+
     # Add more rules as needed
     return True, None

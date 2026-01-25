@@ -13,9 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_settings
 from app.infrastructure.database import get_db_session
 from app.repositories.items import (
+    FakeItemRepository,
     ItemRepository,
     PostgresItemRepository,
-    FakeItemRepository,
 )
 from app.services.items import ItemService
 

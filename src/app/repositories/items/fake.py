@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.domain.items import Item, ItemCreate, ItemUpdate
 from app.repositories.items.interface import ItemRepository
@@ -29,7 +29,7 @@ class FakeItemRepository(ItemRepository):
 
     async def create(self, item_id: str, data: ItemCreate) -> Item:
         """Create a new item."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         item = Item(
             id=item_id,
             name=data.name,
@@ -51,7 +51,7 @@ class FakeItemRepository(ItemRepository):
         updated = existing.model_copy(
             update={
                 **update_data,
-                "updated_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(UTC),
             }
         )
         self.items[item_id] = updated
