@@ -2,6 +2,34 @@
 
 A quick guide to writing code that follows this architecture.
 
+## Overview
+
+This codebase follows a **layered architecture** with clear separation of concerns:
+
+| Layer | Responsibility | Depends On |
+|-------|----------------|------------|
+| **Routes** | HTTP handling (thin) | Services |
+| **Services** | Business logic | Repositories |
+| **Repositories** | Data access | Database/ORM |
+| **Domain** | Business models | Nothing |
+
+**Key principles:**
+
+- **Routes are thin** — validate input, call service, return response
+- **Services own the logic** — orchestration, validation, exceptions
+- **Repositories are swappable** — interface + implementations (Postgres, Fake)
+- **Domain models are pure** — no framework dependencies
+
+**Quick links:**
+
+- [Adding a Feature](#adding-a-new-feature) — step-by-step guide
+- [Rules by Layer](#rules-by-layer) — do's and don'ts
+- [Exception Handling](#exception-handling) — error patterns
+- [Logging](#logging) — structured logging guide
+- [Typing](#typing-best-practices) — type annotation conventions
+
+---
+
 ## Project Structure
 
 ```
