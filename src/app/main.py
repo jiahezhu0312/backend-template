@@ -14,9 +14,16 @@ from app.infrastructure.logging import configure_logging, get_logger
 from app.routes import health_router, items_router
 from app.services import (
     AppException,
+    AuthenticationError,
     AuthorizationError,
     ConflictError,
+    DataSourceError,
+    ExternalServiceError,
     NotFoundError,
+    PreconditionError,
+    RateLimitError,
+    ServiceUnavailableError,
+    TimeoutError,
     ValidationError,
 )
 
@@ -71,10 +78,43 @@ async def request_context_middleware(
     return response
 
 
+# ─────────────────────────────────────────────────────────────
+# Exception Handlers - Client Errors (4xx)
+# ─────────────────────────────────────────────────────────────
+
+
+@app.exception_handler(AuthenticationError)
+async def authentication_handler(request: Request, exc: AuthenticationError) -> JSONResponse:
+    """Handle AuthenticationError exceptions."""
+    return JSONResponse(
+        status_code=401,
+        content={"detail": exc.message},
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+@app.exception_handler(AuthorizationError)
+async def authorization_handler(request: Request, exc: AuthorizationError) -> JSONResponse:
+    """Handle AuthorizationError exceptions."""
+    return JSONResponse(status_code=403, content={"detail": exc.message})
+
+
 @app.exception_handler(NotFoundError)
 async def not_found_handler(request: Request, exc: NotFoundError) -> JSONResponse:
     """Handle NotFoundError exceptions."""
     return JSONResponse(status_code=404, content={"detail": exc.message})
+
+
+@app.exception_handler(ConflictError)
+async def conflict_handler(request: Request, exc: ConflictError) -> JSONResponse:
+    """Handle ConflictError exceptions."""
+    return JSONResponse(status_code=409, content={"detail": exc.message})
+
+
+@app.exception_handler(PreconditionError)
+async def precondition_handler(request: Request, exc: PreconditionError) -> JSONResponse:
+    """Handle PreconditionError exceptions."""
+    return JSONResponse(status_code=412, content={"detail": exc.message})
 
 
 @app.exception_handler(ValidationError)
@@ -86,22 +126,70 @@ async def validation_error_handler(request: Request, exc: ValidationError) -> JS
     return JSONResponse(status_code=422, content=content)
 
 
-@app.exception_handler(ConflictError)
-async def conflict_handler(request: Request, exc: ConflictError) -> JSONResponse:
-    """Handle ConflictError exceptions."""
-    return JSONResponse(status_code=409, content={"detail": exc.message})
-
-
-@app.exception_handler(AuthorizationError)
-async def authorization_handler(request: Request, exc: AuthorizationError) -> JSONResponse:
-    """Handle AuthorizationError exceptions."""
-    return JSONResponse(status_code=403, content={"detail": exc.message})
+@app.exception_handler(RateLimitError)
+async def rate_limit_handler(request: Request, exc: RateLimitError) -> JSONResponse:
+    """Handle RateLimitError exceptions."""
+    headers = {}
+    if exc.retry_after:
+        headers["Retry-After"] = str(exc.retry_after)
+    return JSONResponse(status_code=429, content={"detail": exc.message}, headers=headers)
 
 
 @app.exception_handler(AppException)
 async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
     """Handle generic AppException as 400 Bad Request."""
     return JSONResponse(status_code=400, content={"detail": exc.message})
+
+
+# ─────────────────────────────────────────────────────────────
+# Exception Handlers - Server Errors (5xx)
+# ─────────────────────────────────────────────────────────────
+
+
+@app.exception_handler(DataSourceError)
+async def data_source_handler(request: Request, exc: DataSourceError) -> JSONResponse:
+    """Handle DataSourceError exceptions."""
+    logger.error("data_source_error", source=exc.source, message=exc.message)
+    return JSONResponse(status_code=502, content={"detail": "Data source error"})
+
+
+@app.exception_handler(ExternalServiceError)
+async def external_service_handler(request: Request, exc: ExternalServiceError) -> JSONResponse:
+    """Handle ExternalServiceError exceptions."""
+    logger.error(
+        "external_service_error",
+        service=exc.service,
+        message=exc.message,
+        status_code=exc.status_code,
+    )
+    return JSONResponse(status_code=502, content={"detail": "External service error"})
+
+
+@app.exception_handler(ServiceUnavailableError)
+async def service_unavailable_handler(
+    request: Request, exc: ServiceUnavailableError
+) -> JSONResponse:
+    """Handle ServiceUnavailableError exceptions."""
+    logger.warning("service_unavailable", message=exc.message)
+    headers = {}
+    if exc.retry_after:
+        headers["Retry-After"] = str(exc.retry_after)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": exc.message},
+        headers=headers,
+    )
+
+
+@app.exception_handler(TimeoutError)
+async def timeout_handler(request: Request, exc: TimeoutError) -> JSONResponse:
+    """Handle TimeoutError exceptions."""
+    logger.error(
+        "timeout_error",
+        operation=exc.operation,
+        timeout_seconds=exc.timeout_seconds,
+    )
+    return JSONResponse(status_code=504, content={"detail": "Operation timed out"})
 
 
 @app.exception_handler(Exception)

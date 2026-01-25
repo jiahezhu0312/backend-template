@@ -5,9 +5,9 @@ A layered FastAPI backend template with testable architecture, using uv for pack
 ## Features
 
 - **Layered Architecture**: Domain models, Services, Repositories, Routes
-- **Dependency Injection**: Swap real implementations for fakes in tests
-- **Pydantic Everywhere**: Runtime validation at all layers (TypeScript-style)
-- **PostgreSQL + Alembic**: Async database with migrations
+- **Dependency Injection**: Swap implementations easily (in-memory, PostgreSQL, Firestore, etc.)
+- **Pydantic Everywhere**: Runtime validation at all layers
+- **Storage Agnostic**: Repository pattern lets you plug in any backend
 - **Structured Logging**: JSON logs in production with structlog
 - **Docker Ready**: Multi-stage Dockerfile + docker-compose
 
@@ -17,11 +17,12 @@ A layered FastAPI backend template with testable architecture, using uv for pack
 src/app/
 ├── main.py              # FastAPI app entry point
 ├── config.py            # Pydantic Settings
-├── dependencies.py      # DI wiring
+├── dependencies/        # DI wiring (per-feature)
+│   └── items.py
 ├── domain/
 │   └── items.py         # Pydantic domain models (internal)
 ├── schema/
-│   └── items.py         # Item request/response schemas
+│   └── items.py         # API request/response schemas
 ├── services/
 │   └── items/
 │       ├── service.py   # Business logic (orchestration)
@@ -29,11 +30,8 @@ src/app/
 ├── repositories/
 │   └── items/
 │       ├── interface.py # Abstract interface
-│       ├── postgres.py  # PostgreSQL implementation
-│       └── fake.py      # In-memory (for tests)
+│       └── fake.py      # In-memory implementation
 ├── infrastructure/
-│   ├── database.py      # SQLAlchemy async setup
-│   ├── orm.py           # ORM models
 │   └── logging.py       # structlog configuration
 └── routes/
     └── items.py         # CRUD routes
@@ -44,12 +42,8 @@ src/app/
 ### Option 1: With Docker
 
 ```bash
-# Start app + database
+# Start app
 docker compose up --build -d
-
-# Run migrations to create tables
-docker compose exec app alembic revision --autogenerate -m "initial"
-docker compose exec app alembic upgrade head
 
 # View logs
 docker compose logs -f
@@ -57,55 +51,16 @@ docker compose logs -f
 
 Open http://localhost:8000/docs to use the API.
 
-### Option 2: Local Development (without Docker)
+### Option 2: Local Development
 
-Prerequisites: Python 3.12+, [uv](https://docs.astral.sh/uv/), PostgreSQL running locally
+Prerequisites: Python 3.12+, [uv](https://docs.astral.sh/uv/)
 
 ```bash
 # Install dependencies
 uv sync
 
-# Create .env file
-echo "DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/app" > .env
-
-# Run migrations
-uv run alembic revision --autogenerate -m "initial"
-uv run alembic upgrade head
-
 # Start server
 uv run uvicorn app.main:app --reload
-```
-
-## Database Migrations
-
-This template uses **Alembic** to manage database schema changes.
-
-### Why Migrations?
-
-When you use a real database, tables don't create themselves. Migrations:
-1. Generate SQL to create/modify tables based on your ORM models
-2. Track which changes have been applied
-3. Allow rolling back changes if needed
-
-### Common Commands
-
-```bash
-# Generate a new migration (after changing ORM models)
-alembic revision --autogenerate -m "description of change"
-
-# Apply all pending migrations
-alembic upgrade head
-
-# Rollback last migration
-alembic downgrade -1
-
-# View migration history
-alembic history
-```
-
-With Docker, prefix commands with `docker compose exec app`:
-```bash
-docker compose exec app alembic upgrade head
 ```
 
 ## Environment Variables
@@ -114,13 +69,14 @@ docker compose exec app alembic upgrade head
 |----------|-------------|---------|
 | `ENV` | Environment (local, test, staging, production) | `local` |
 | `DEBUG` | Enable debug mode | `false` |
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql+asyncpg://postgres:postgres@localhost:5432/app` |
 | `LOG_LEVEL` | Logging level | `INFO` |
 | `LOG_FORMAT` | Log format (console, json) | `console` |
+| `CORS_ORIGINS` | Comma-separated allowed origins | (empty) |
 
-## Development
+## Documentation
 
-See [DEVELOPMENT.md](DEVELOPMENT.md) for the full developer guide.
+- [Developer Guide](docs/development.md) — architecture, patterns, and conventions
+- [Code Review Guide](docs/code-review.md) — checklist for reviewers
 
 ### Quick Reference
 
@@ -130,7 +86,6 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for the full developer guide.
 | Add internal business models | `domain/` |
 | Add calculations/rules | `services/*/logic.py` |
 | Coordinate operations | `services/*/service.py` |
-| Add database table | `infrastructure/orm.py` + migration |
 | Read/write data | `repositories/` |
 | Handle HTTP requests | `routes/` |
 
@@ -138,16 +93,27 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for the full developer guide.
 
 1. **Domain model** → `domain/your_feature.py`
 2. **API schemas** → `schema/your_feature.py`
-3. **Repository** → `repositories/your_feature/`
-4. **Service** → `services/your_feature/`
-5. **Routes** → `routes/your_feature.py`
-6. **Wire it up** → `dependencies.py` and `main.py`
-7. **Migration** → `uv run alembic revision --autogenerate -m "add your_feature"`
+3. **Repository interface** → `repositories/your_feature/interface.py`
+4. **Repository implementation** → `repositories/your_feature/fake.py` (or your storage backend)
+5. **Service** → `services/your_feature/`
+6. **Routes** → `routes/your_feature.py`
+7. **Wire it up** → `dependencies/your_feature.py` and `main.py`
+
+### Adding a Real Database
+
+The template uses an in-memory repository by default. To add a real database:
+
+1. Add dependencies (e.g., `sqlalchemy`, `asyncpg` for PostgreSQL)
+2. Create a new repository implementation (e.g., `PostgresItemRepository`)
+3. Update `dependencies.py` to return the real implementation based on settings
+4. Add database URL to config if needed
+
+The repository pattern makes this swap straightforward—your services don't change.
 
 ## Architecture
 
 ```
-Request → Schema → Service → Domain → Repository → Database
+Request → Schema → Service → Domain → Repository → Storage
                       ↓
 Response ← Schema ← Service
 ```
@@ -159,7 +125,7 @@ Response ← Schema ← Service
 | **Services** | Business logic + orchestration |
 | **Domain** | Internal business models |
 | **Repositories** | Data access abstraction |
-| **Infrastructure** | Database, logging, external clients |
+| **Infrastructure** | Logging, external clients |
 
 ## API Endpoints
 
@@ -176,8 +142,7 @@ Response ← Schema ← Service
 ## Production Checklist
 
 - Set `ENV=production` and `LOG_FORMAT=json`
-- Use a managed PostgreSQL instance
-- Run `alembic upgrade head` before deploying new code
+- Configure your storage backend (CloudSQL, Firestore, etc.)
 - Review CORS and allowed hosts
 
 ## License

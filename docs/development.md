@@ -10,14 +10,14 @@ This codebase follows a **layered architecture** with clear separation of concer
 |-------|----------------|------------|
 | **Routes** | HTTP handling (thin) | Services |
 | **Services** | Business logic | Repositories |
-| **Repositories** | Data access | Database/ORM |
+| **Repositories** | Data access | Storage backend |
 | **Domain** | Business models | Nothing |
 
 **Key principles:**
 
 - **Routes are thin** — validate input, call service, return response
 - **Services own the logic** — orchestration, validation, exceptions
-- **Repositories are swappable** — interface + implementations (Postgres, Fake)
+- **Repositories are swappable** — interface + implementations (in-memory, SQL, Firestore, etc.)
 - **Domain models are pure** — no framework dependencies
 
 **Quick links:**
@@ -39,7 +39,8 @@ src/app/
 ├── repositories/   # Data access (interface + implementations)
 ├── services/       # Business logic
 ├── routes/         # HTTP endpoints (thin)
-└── infrastructure/ # Database, logging, external clients
+├── dependencies/   # DI wiring (per-feature)
+└── infrastructure/ # Logging, external clients
 ```
 
 ---
@@ -138,14 +139,23 @@ async def create_user(
 
 ### Step 6: Wire Dependencies
 
-Add to `src/app/dependencies.py`:
+Create `src/app/dependencies/users.py`:
 
 ```python
-async def get_user_repository(...) -> UserRepository:
+from app.repositories.users import FakeUserRepository, UserRepository
+from app.services.users import UserService
+
+def get_user_repository(...) -> UserRepository:
     ...
 
 async def get_user_service(...) -> UserService:
     ...
+```
+
+Then export from `src/app/dependencies/__init__.py`:
+
+```python
+from app.dependencies.users import get_user_repository, get_user_service
 ```
 
 ### Step 7: Register Route
@@ -713,10 +723,8 @@ async def rate_limit_handler(request: Request, exc: RateLimitError) -> JSONRespo
 
 - [ ] Domain model in `domain/`
 - [ ] Schema in `schema/`
-- [ ] ORM model in `infrastructure/orm.py`
 - [ ] Repository interface + implementations in `repositories/`
 - [ ] Service in `services/`
 - [ ] Route in `routes/`
-- [ ] Dependencies wired in `dependencies.py`
+- [ ] Dependencies wired in `dependencies/`
 - [ ] Router registered in `main.py`
-- [ ] Migration: `alembic revision --autogenerate -m "add feature"`
