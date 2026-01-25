@@ -9,7 +9,6 @@ A layered FastAPI backend template with testable architecture, using uv for pack
 - **Pydantic Everywhere**: Runtime validation at all layers
 - **Storage Agnostic**: Repository pattern lets you plug in any backend
 - **Structured Logging**: JSON logs in production with structlog
-- **Docker Ready**: Multi-stage Dockerfile + docker-compose
 
 ## Project Structure
 
@@ -39,20 +38,6 @@ src/app/
 
 ## Quick Start
 
-### Option 1: With Docker
-
-```bash
-# Start app
-docker compose up --build -d
-
-# View logs
-docker compose logs -f
-```
-
-Open http://localhost:8000/docs to use the API.
-
-### Option 2: Local Development
-
 Prerequisites: Python 3.12+, [uv](https://docs.astral.sh/uv/)
 
 ```bash
@@ -61,7 +46,12 @@ uv sync
 
 # Start server
 uv run uvicorn app.main:app --reload
+
+# Or use make
+make dev
 ```
+
+Open http://localhost:8000/docs to use the API.
 
 ## Environment Variables
 
