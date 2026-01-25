@@ -25,7 +25,8 @@ from app.exceptions import (
     TimeoutError,
     ValidationError,
 )
-from app.routes import health_router, items_router
+from app.routes.health import router as health_router
+from app.routes.items import router as items_router
 
 settings = get_settings()
 configure_logging()

@@ -46,6 +46,22 @@ src/app/
 └── infrastructure/ # Logging, external clients
 ```
 
+### Import Convention
+
+Always import directly from modules, not from package `__init__.py`:
+
+```python
+# ✅ Do this - direct imports
+from app.services.items.service import ItemService
+from app.repositories.items.interface import ItemRepository
+from app.dependencies.items import get_item_service
+
+# ❌ Not this - no __init__.py re-exports to maintain
+from app.services import ItemService
+```
+
+This means adding a new feature doesn't require updating any `__init__.py` files.
+
 ---
 
 ## Practical Guide: Implementing from OpenAPI Contract

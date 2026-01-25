@@ -9,7 +9,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, status
 
 from app.common.pagination import normalize_pagination
-from app.dependencies import get_item_service
+from app.dependencies.items import get_item_service
 from app.domain.items import ItemCreate, ItemUpdate
 from app.schema.items import (
     CreateItemRequest,
