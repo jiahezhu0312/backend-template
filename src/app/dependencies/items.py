@@ -8,8 +8,9 @@ from typing import Annotated
 from fastapi import Depends
 
 from app.config import Settings, get_settings
-from app.repositories.items import FakeItemRepository, ItemRepository
-from app.services.items import ItemService
+from app.repositories.items.fake import FakeItemRepository
+from app.repositories.items.interface import ItemRepository
+from app.services.items.service import ItemService
 
 # Singleton in-memory repository for test/local mode.
 _fake_item_repository: FakeItemRepository | None = None

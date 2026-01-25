@@ -7,7 +7,7 @@ For complex calculations, it calls pure functions from logic.py.
 import uuid
 
 from app.domain.items import Item, ItemCreate, ItemUpdate
-from app.repositories.items import ItemRepository
+from app.repositories.items.interface import ItemRepository
 from app.exceptions import NotFoundError
 
 

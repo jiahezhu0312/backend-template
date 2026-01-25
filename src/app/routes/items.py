@@ -17,7 +17,7 @@ from app.schema.items import (
     ItemResponse,
     UpdateItemRequest,
 )
-from app.services.items import ItemService
+from app.services.items.service import ItemService
 
 router = APIRouter(prefix="/items", tags=["items"])
 
