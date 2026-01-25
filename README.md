@@ -134,6 +134,16 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for the full developer guide.
 | Read/write data | `repositories/` |
 | Handle HTTP requests | `routes/` |
 
+### Adding a Feature
+
+1. **Domain model** → `domain/your_feature.py`
+2. **API schemas** → `schema/your_feature.py`
+3. **Repository** → `repositories/your_feature/`
+4. **Service** → `services/your_feature/`
+5. **Routes** → `routes/your_feature.py`
+6. **Wire it up** → `dependencies.py` and `main.py`
+7. **Migration** → `uv run alembic revision --autogenerate -m "add your_feature"`
+
 ## Architecture
 
 ```
