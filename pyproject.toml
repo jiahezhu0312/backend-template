@@ -36,7 +36,9 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP"]
+# Minimal checks - only things that catch real bugs
+# E = syntax errors, F = undefined names/unused imports, I = import orders
+select = ["E", "F", "I"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -44,5 +46,5 @@ testpaths = ["tests"]
 
 [tool.pyright]
 pythonVersion = "3.12"
-typeCheckingMode = "standard"
+typeCheckingMode = "strict"
 include = ["src"]
