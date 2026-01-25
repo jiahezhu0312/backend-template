@@ -11,8 +11,8 @@ from app.config import get_settings
 def _add_gcp_fields(
     logger: structlog.types.WrappedLogger,
     method_name: str,
-    event_dict: dict[str, object],
-) -> dict[str, object]:
+    event_dict: structlog.types.EventDict,
+) -> structlog.types.EventDict:
     """Map structlog fields to GCP Cloud Logging expectations."""
     level = event_dict.get("level")
     if isinstance(level, str):
