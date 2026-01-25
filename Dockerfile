@@ -32,8 +32,6 @@ COPY --from=dependencies /app/.venv /app/.venv
 
 # Copy application code
 COPY --chown=appuser:appgroup src/app ./app/
-COPY --chown=appuser:appgroup alembic ./alembic/
-COPY --chown=appuser:appgroup alembic.ini ./
 
 # Set PATH to use virtual environment and PYTHONPATH for imports
 ENV PATH="/app/.venv/bin:$PATH"

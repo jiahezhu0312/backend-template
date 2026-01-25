@@ -1,4 +1,4 @@
-.PHONY: dev dev-down dev-logs db-shell migrate migrate-new lint typecheck format clean
+.PHONY: dev dev-down dev-logs lint typecheck clean
 
 # Development
 dev:
@@ -10,18 +10,7 @@ dev-down:
 dev-logs:
 	docker compose logs -f app
 
-db-shell:
-	docker compose exec db psql -U postgres -d app
-
-# Database migrations
-migrate:
-	docker compose exec app alembic upgrade head
-
-migrate-new:
-	@read -p "Migration message: " msg; \
-	docker compose exec app alembic revision --autogenerate -m "$$msg"
-
-# Code quality (optional - not enforced)
+# Code quality
 lint:
 	uv run ruff check .
 

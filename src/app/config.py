@@ -3,7 +3,6 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,9 +18,6 @@ class Settings(BaseSettings):
     # Application
     env: Literal["local", "test", "staging", "production"] = "local"
     debug: bool = False
-
-    # Database
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/app"
 
     # Logging
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
@@ -44,18 +40,6 @@ class Settings(BaseSettings):
         if not self.cors_origins:
             return []
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
-
-    @model_validator(mode="after")
-    def validate_production_settings(self) -> "Settings":
-        """Ensure production has secure configuration."""
-        if self.env == "production":
-            # Reject default database credentials in production
-            if "postgres:postgres@" in self.database_url:
-                raise ValueError(
-                    "Default database credentials not allowed in production. "
-                    "Set DATABASE_URL with secure credentials."
-                )
-        return self
 
 
 @lru_cache
