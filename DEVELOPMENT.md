@@ -605,6 +605,82 @@ logger.info("item_created", item_id="123")
 
 ---
 
+## Exception Handling
+
+Services raise domain exceptions. FastAPI exception handlers convert them to HTTP responses.
+
+### Exception Hierarchy
+
+| Exception | HTTP Status | Use For |
+|-----------|-------------|---------|
+| `NotFoundError` | 404 | Resource doesn't exist |
+| `ValidationError` | 422 | Business rule violation |
+| `ConflictError` | 409 | Duplicate or state conflict |
+| `AuthorizationError` | 403 | Permission denied |
+| `AppException` | 400 | Generic application error |
+
+### Raising Exceptions in Services
+
+```python
+from app.services.exceptions import NotFoundError, ValidationError
+
+class ItemService:
+    async def get_item(self, item_id: str) -> Item:
+        item = await self.items.get(item_id)
+        if item is None:
+            raise NotFoundError("Item", item_id)
+        return item
+
+    async def create_item(self, data: ItemCreate) -> Item:
+        if await self.items.exists_by_name(data.name):
+            raise ConflictError(f"Item '{data.name}' already exists")
+        return await self.items.create(data)
+```
+
+### Routes Stay Clean
+
+```python
+# ✅ DO: Let exceptions propagate (handlers convert to HTTP responses)
+@router.get("/{item_id}")
+async def get_item(item_id: str, service: ItemService) -> ItemResponse:
+    item = await service.get_item(item_id)  # Raises NotFoundError if missing
+    return ItemResponse.model_validate(item)
+
+# ❌ DON'T: Catch and re-raise as HTTPException
+@router.get("/{item_id}")
+async def get_item(item_id: str, service: ItemService) -> ItemResponse:
+    item = await service.get_item(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return ItemResponse.model_validate(item)
+```
+
+### Creating Custom Exceptions
+
+Add new exceptions to `services/exceptions.py`:
+
+```python
+class RateLimitError(AppException):
+    """Raised when rate limit is exceeded."""
+    def __init__(self, retry_after: int = 60) -> None:
+        self.retry_after = retry_after
+        super().__init__(f"Rate limit exceeded. Retry after {retry_after}s")
+```
+
+Then add a handler in `main.py`:
+
+```python
+@app.exception_handler(RateLimitError)
+async def rate_limit_handler(request: Request, exc: RateLimitError) -> JSONResponse:
+    return JSONResponse(
+        status_code=429,
+        content={"detail": exc.message},
+        headers={"Retry-After": str(exc.retry_after)},
+    )
+```
+
+---
+
 ## Checklist for New Features
 
 - [ ] Domain model in `domain/`
