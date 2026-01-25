@@ -6,15 +6,16 @@ Business logic belongs in services, not here.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Query, status
 
+from app.common.pagination import normalize_pagination
 from app.dependencies import get_item_service
 from app.domain.items import ItemCreate, ItemUpdate
 from app.schema.items import (
     CreateItemRequest,
-    UpdateItemRequest,
-    ItemResponse,
     ItemListResponse,
+    ItemResponse,
+    UpdateItemRequest,
 )
 from app.services.items import ItemService
 
@@ -24,10 +25,11 @@ router = APIRouter(prefix="/items", tags=["items"])
 @router.get("", response_model=ItemListResponse)
 async def list_items(
     service: Annotated[ItemService, Depends(get_item_service)],
-    skip: int = 0,
-    limit: int = 100,
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 100,
 ) -> ItemListResponse:
     """List all items with pagination."""
+    skip, limit = normalize_pagination(skip=skip, limit=limit)
     items = await service.list_items(skip=skip, limit=limit)
     total = await service.count_items()
     return ItemListResponse(
@@ -43,11 +45,6 @@ async def get_item(
 ) -> ItemResponse:
     """Get a single item by ID."""
     item = await service.get_item(item_id)
-    if not item:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Item not found",
-        )
     return ItemResponse.model_validate(item)
 
 
@@ -71,11 +68,6 @@ async def update_item(
     """Update an existing item."""
     data = ItemUpdate(**request.model_dump(exclude_unset=True))
     item = await service.update_item(item_id, data)
-    if not item:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Item not found",
-        )
     return ItemResponse.model_validate(item)
 
 
@@ -85,9 +77,4 @@ async def delete_item(
     service: Annotated[ItemService, Depends(get_item_service)],
 ) -> None:
     """Delete an item."""
-    deleted = await service.delete_item(item_id)
-    if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Item not found",
-        )
+    await service.delete_item(item_id)

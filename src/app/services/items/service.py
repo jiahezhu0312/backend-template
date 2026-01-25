@@ -8,6 +8,7 @@ import uuid
 
 from app.domain.items import Item, ItemCreate, ItemUpdate
 from app.repositories.items import ItemRepository
+from app.services.exceptions import NotFoundError
 
 
 class ItemService:
@@ -16,9 +17,12 @@ class ItemService:
     def __init__(self, items: ItemRepository) -> None:
         self.items = items
 
-    async def get_item(self, item_id: str) -> Item | None:
-        """Get an item by ID."""
-        return await self.items.get(item_id)
+    async def get_item(self, item_id: str) -> Item:
+        """Get an item by ID. Raises NotFoundError if not found."""
+        item = await self.items.get(item_id)
+        if item is None:
+            raise NotFoundError("Item", item_id)
+        return item
 
     async def list_items(self, *, skip: int = 0, limit: int = 100) -> list[Item]:
         """List items with pagination."""
@@ -33,10 +37,15 @@ class ItemService:
         item_id = str(uuid.uuid4())
         return await self.items.create(item_id, data)
 
-    async def update_item(self, item_id: str, data: ItemUpdate) -> Item | None:
-        """Update an existing item."""
-        return await self.items.update(item_id, data)
+    async def update_item(self, item_id: str, data: ItemUpdate) -> Item:
+        """Update an existing item. Raises NotFoundError if not found."""
+        item = await self.items.update(item_id, data)
+        if item is None:
+            raise NotFoundError("Item", item_id)
+        return item
 
-    async def delete_item(self, item_id: str) -> bool:
-        """Delete an item."""
-        return await self.items.delete(item_id)
+    async def delete_item(self, item_id: str) -> None:
+        """Delete an item. Raises NotFoundError if not found."""
+        deleted = await self.items.delete(item_id)
+        if not deleted:
+            raise NotFoundError("Item", item_id)
