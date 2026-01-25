@@ -50,11 +50,14 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
-def reset_database() -> None:
+async def reset_database() -> None:
     """Reset database engine and session factory.
 
     Call this in test fixtures to ensure test isolation.
+    Properly disposes the engine to avoid connection leaks.
     """
     global _engine, _async_session_factory
+    if _engine is not None:
+        await _engine.dispose()
     _engine = None
     _async_session_factory = None

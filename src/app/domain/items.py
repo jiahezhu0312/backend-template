@@ -2,11 +2,15 @@
 
 These represent the internal business concept of an Item.
 Used by services and repositories.
+
+Note: Validation constraints (min_length, max_length) are defined in the
+schema layer (schema/items.py) which is the API boundary. Domain models
+trust that data has already been validated by the time it reaches here.
 """
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 
 class Item(BaseModel):
@@ -27,15 +31,21 @@ class Item(BaseModel):
 
 
 class ItemCreate(BaseModel):
-    """Data required to create a new item."""
+    """Data required to create a new item.
 
-    name: str = Field(..., min_length=1, max_length=255)
-    description: str | None = Field(None, max_length=1000)
+    Validation is handled at the API boundary (schema layer).
+    """
+
+    name: str
+    description: str | None = None
 
 
 class ItemUpdate(BaseModel):
-    """Data for updating an existing item. All fields optional."""
+    """Data for updating an existing item. All fields optional.
 
-    name: str | None = Field(None, min_length=1, max_length=255)
-    description: str | None = Field(None, max_length=1000)
+    Validation is handled at the API boundary (schema layer).
+    """
+
+    name: str | None = None
+    description: str | None = None
     is_active: bool | None = None
