@@ -1,4 +1,8 @@
-.PHONY: dev lint typecheck clean
+.PHONY: install dev lint typecheck clean
+
+# Setup
+install:
+	uv sync --extra dev
 
 # Development
 dev:

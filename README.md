@@ -41,14 +41,15 @@ src/app/
 Prerequisites: Python 3.12+, [uv](https://docs.astral.sh/uv/)
 
 ```bash
-# Install dependencies
-uv sync
+# Install dependencies (including dev tools like pytest, ruff, pyright)
+uv sync --extra dev
 
 # Start server
 uv run uvicorn app.main:app --reload
 
 # Or use make
-make dev
+make install  # Install dependencies
+make dev      # Start dev server
 ```
 
 Open http://localhost:8000/docs to use the API.
