@@ -69,9 +69,6 @@ def configure_logging() -> None:
 
     # Quiet noisy loggers
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-    logging.getLogger("sqlalchemy.engine").setLevel(
-        logging.DEBUG if settings.debug else logging.WARNING
-    )
 
 
 def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:

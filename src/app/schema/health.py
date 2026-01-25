@@ -7,4 +7,3 @@ class HealthResponse(BaseModel):
     """Response model for health check endpoint."""
 
     status: str
-    database: str
