@@ -1,0 +1,172 @@
+{# Route handlers per tag - fits app/routes style: thin routes, Depends(service). #}
+{# Generator writes to output_dir/routers/<tag>.py. Copy to app/routes/; imports use app.* so they work there. #}
+{# Rendered once per tag in the second pass; skip when tag is undefined (first pass). #}
+{% if tag is defined %}
+{% set singular = tag[:-1] if tag.endswith('s') else tag %}
+{% set service_class = (singular[0]|upper + singular[1:] if singular else '') + 'Service' %}
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Header, Path, Query, status
+
+from app.dependencies.{{ tag }} import get_{{ singular }}_service
+from app.schema.{{ tag }} import *
+from app.services.{{ tag }}.service import {{ service_class }}
+
+router = APIRouter(prefix="/{{ tag }}", tags=["{{ tag }}"])
+
+{# Macro to convert OpenAPI type to Python type #}
+{% macro python_type(schema) -%}
+{%- if schema.type == 'integer' -%}int
+{%- elif schema.type == 'number' -%}float
+{%- elif schema.type == 'boolean' -%}bool
+{%- elif schema.type == 'string' and schema.format == 'date-time' -%}datetime
+{%- elif schema.type == 'string' and schema.format == 'date' -%}date
+{%- elif schema.type == 'string' -%}str
+{%- elif schema.type == 'array' -%}list[{{ python_type(schema.items) }}]
+{%- else -%}str
+{%- endif -%}
+{%- endmacro %}
+
+{# Macro to build constraint kwargs for Query/Path/Header #}
+{% macro constraint_kwargs(schema, param) -%}
+{%- set parts = [] -%}
+{%- if param.description is defined and param.description -%}
+{%- set _ = parts.append('description="' ~ param.description ~ '"') -%}
+{%- endif -%}
+{%- if schema.minimum is defined -%}
+{%- set _ = parts.append('ge=' ~ schema.minimum) -%}
+{%- endif -%}
+{%- if schema.maximum is defined -%}
+{%- set _ = parts.append('le=' ~ schema.maximum) -%}
+{%- endif -%}
+{%- if schema.exclusiveMinimum is defined -%}
+{%- set _ = parts.append('gt=' ~ schema.exclusiveMinimum) -%}
+{%- endif -%}
+{%- if schema.exclusiveMaximum is defined -%}
+{%- set _ = parts.append('lt=' ~ schema.exclusiveMaximum) -%}
+{%- endif -%}
+{%- if schema.minLength is defined -%}
+{%- set _ = parts.append('min_length=' ~ schema.minLength) -%}
+{%- endif -%}
+{%- if schema.maxLength is defined -%}
+{%- set _ = parts.append('max_length=' ~ schema.maxLength) -%}
+{%- endif -%}
+{%- if schema.pattern is defined -%}
+{%- set _ = parts.append('pattern=r"' ~ schema.pattern ~ '"') -%}
+{%- endif -%}
+{{ parts | join(', ') }}
+{%- endmacro %}
+
+{# Macro to render a single parameter with proper FastAPI annotation #}
+{% macro render_param(param) -%}
+{%- set schema = param.schema_ if param.schema_ is defined else param.schema -%}
+{%- set base_type = python_type(schema) -%}
+{%- set constraints = constraint_kwargs(schema, param) -%}
+{%- set has_default = schema.default is defined -%}
+{%- set is_required = param.required | default(false) -%}
+{%- if param.in_ == 'path' or param['in'] == 'path' -%}
+    {{ param.name }}: Annotated[{{ base_type }}, Path({{ constraints }})]
+{%- elif param.in_ == 'query' or param['in'] == 'query' -%}
+{%- if is_required and not has_default -%}
+    {{ param.name }}: Annotated[{{ base_type }}, Query({{ constraints }})]
+{%- elif has_default -%}
+    {{ param.name }}: Annotated[{{ base_type }}, Query({{ constraints }})] = {{ schema.default | tojson if schema.default is string else schema.default }}
+{%- else -%}
+    {{ param.name }}: Annotated[{{ base_type }} | None, Query({{ constraints }})] = None
+{%- endif -%}
+{%- elif param.in_ == 'header' or param['in'] == 'header' -%}
+{%- set header_name = param.name | replace('-', '_') | lower -%}
+{%- if is_required and not has_default -%}
+    {{ header_name }}: Annotated[{{ base_type }}, Header(alias="{{ param.name }}"{{ ', ' ~ constraints if constraints }})]
+{%- elif has_default -%}
+    {{ header_name }}: Annotated[{{ base_type }}, Header(alias="{{ param.name }}"{{ ', ' ~ constraints if constraints }})] = {{ schema.default | tojson if schema.default is string else schema.default }}
+{%- else -%}
+    {{ header_name }}: Annotated[{{ base_type }} | None, Header(alias="{{ param.name }}"{{ ', ' ~ constraints if constraints }})] = None
+{%- endif -%}
+{%- endif -%}
+{%- endmacro %}
+
+{# Macro to check if a parameter has a default value #}
+{% macro has_default(param) -%}
+{%- set schema = param.schema_ if param.schema_ is defined else param.schema -%}
+{%- set param_in = param.in_ if param.in_ is defined else param['in'] -%}
+{%- if param_in == 'path' -%}false
+{%- elif schema.default is defined -%}true
+{%- elif not (param.required | default(false)) -%}true
+{%- else -%}false
+{%- endif -%}
+{%- endmacro %}
+
+{% for operation in operations %}
+{% if operation.tags[0] == tag %}
+{% set path_suffix = operation.snake_case_path.replace('/' ~ tag, '') or '' %}
+@router.{{ operation.type }}('{{ path_suffix }}', response_model={{ operation.response }}
+    {%- if operation.type == 'post' %}, status_code=status.HTTP_201_CREATED{% endif %}
+    {%- if operation.additional_responses %}, responses={
+        {% for status_code, models in operation.additional_responses.items() %}
+        '{{ status_code }}': {
+            {% for key, model in models.items() %}
+            '{{ key }}': {{ model }}{% if not loop.last %},{% endif %}
+            {% endfor %}
+        }{% if not loop.last %},{% endif %}
+        {% endfor %}
+    }{% endif %}
+    {%- if operation.tags %}, tags={{ operation.tags }}{% endif %})
+async def {{ operation.function_name }}(
+{#- 1. Path parameters (always required, no defaults) -#}
+{%- if operation.parameters is defined %}
+{%- for param in operation.parameters %}
+{%- set param_in = param.in_ if param.in_ is defined else param['in'] %}
+{%- if param_in == 'path' %}
+{{ render_param(param) }},
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{#- 2. Request body (required, no default) -#}
+{%- if operation.request is defined and operation.request %}
+    body: {{ operation.request }},
+{%- elif operation.request_body is defined and operation.request_body %}
+    body: {{ operation.request_body }},
+{%- elif 'body:' in operation.snake_case_arguments %}
+{%- set args = operation.snake_case_arguments %}
+{%- set body_start = args.find('body:') %}
+{%- if body_start != -1 %}
+{%- set after_body = args[body_start + 5:].strip() %}
+{%- set body_type = after_body.split(',')[0].split('=')[0].strip() %}
+    body: {{ body_type }},
+{%- endif %}
+{%- endif %}
+{#- 3. Required query/header parameters (no defaults) -#}
+{%- if operation.parameters is defined %}
+{%- for param in operation.parameters %}
+{%- set param_in = param.in_ if param.in_ is defined else param['in'] %}
+{%- set schema = param.schema_ if param.schema_ is defined else param.schema %}
+{%- if param_in != 'path' and (param.required | default(false)) and schema.default is not defined %}
+{{ render_param(param) }},
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{#- 4. Service dependency -#}
+    service: Annotated[{{ service_class }}, Depends(get_{{ singular }}_service)],
+{#- 5. Optional query/header parameters (with defaults) - must come last -#}
+{%- if operation.parameters is defined %}
+{%- for param in operation.parameters %}
+{%- set param_in = param.in_ if param.in_ is defined else param['in'] %}
+{%- set schema = param.schema_ if param.schema_ is defined else param.schema %}
+{%- if param_in != 'path' and (schema.default is defined or not (param.required | default(false))) %}
+{{ render_param(param) }},
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+) -> {{ operation.return_type|replace('Optional[', '')|replace(']', ' | None') }}:
+    {%- if operation.summary %}
+    """{{ operation.summary }}"""
+    {%- endif %}
+    # TODO: call service and return response, e.g. return service.get_{{ singular }}(...)
+    ...
+
+{% endif %}
+{% endfor %}
+{% endif %}

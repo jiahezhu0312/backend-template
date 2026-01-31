@@ -1,0 +1,12 @@
+{# Snippet to add to app/main.py: register generated routers. #}
+{# After copying generated routers to app/routes/, copy these lines into main.py. #}
+from __future__ import annotations
+
+{% for router in routers %}
+from app.routes.{{ router }} import router as {{ router }}_router
+{% endfor %}
+
+# Generated router registration (add after existing include_router calls):
+{% for router in routers %}
+app.include_router({{ router }}_router)
+{% endfor %}
