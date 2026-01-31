@@ -22,6 +22,7 @@ This codebase follows a **layered architecture** with clear separation of concer
 
 **Quick links:**
 
+- [Writing OpenAPI Specs](#writing-openapi-specs) — practical YAML guide for codegen
 - [Implementing from OpenAPI](#practical-guide-implementing-from-openapi-contract) — simple vs complex scenarios
 - [Adding a Feature](#adding-a-new-feature) — step-by-step guide
 - [When to Skip Layers](#when-to-skip-layers-pragmatic-shortcuts) — simplify when appropriate
@@ -61,6 +62,700 @@ from app.services import ItemService
 ```
 
 This means adding a new feature doesn't require updating any `__init__.py` files.
+
+---
+
+## Generating from OpenAPI (fastapi-code-generator)
+
+This project uses **fastapi-code-generator** with a **custom template** so generated code matches the layered layout: routes, schema, and service-based dependencies.
+
+### What gets generated
+
+| Output | Location | Purpose |
+|--------|----------|---------|
+| Route handlers (one per OpenAPI tag) | `src/app/_generated/routers/<tag>.py` | Thin endpoints with `Depends(get_<singular>_service)`, `response_model`, docstrings, `201` for POST |
+| Pydantic models from `components/schemas` | `src/app/_generated/schema/` | Request/response models (merge into `app/schema/` as needed) |
+| Router registration snippet | `src/app/_generated/router_registration.py` | Lines to add to `main.py` to register the generated routers |
+| Dependencies (model imports) | `src/app/_generated/dependencies.py` | Used by generated route files; not copied into `app/dependencies/` |
+
+The generator writes to `src/app/_generated/` so it never overwrites your `main.py`, `routes/`, or `dependencies/` package. You copy or merge from `_generated` into the app.
+
+### Custom template
+
+Templates live in **`templates/fastapi-codegen/`**:
+
+- **`routers.jinja2`** — One route file per tag: `APIRouter(prefix="/<tag>", tags=["<tag>"])`, imports from `app.schema.<tag>`, `app.dependencies.<tag>`, and `app.services.<tag>.service`, and each handler gets `service: Annotated[<Service>, Depends(get_<singular>_service)]` and a TODO body.
+- **`router_registration.jinja2`** — Produces `router_registration.py` with `from app.routes.<tag> import router as <tag>_router` and `app.include_router(<tag>_router)` (for use after copying routers into `app/routes/`).
+
+OpenAPI **tags** drive the split: each tag (e.g. `items`) gets one router file and is assumed to have a matching `app.dependencies.<tag>.get_<singular>_service` and `app.services.<tag>.service.<Service>` (e.g. `items` → `get_item_service`, `ItemService`).
+
+### How to run
+
+1. Put your OpenAPI spec at the repo root (e.g. `openapi.yaml`) or pass its path.
+2. From the repo root:
+
+   ```bash
+   make codegen
+   # or with a custom spec:
+   make codegen INPUT=path/to/your/openapi.yaml
+   ```
+
+   This runs fastapi-codegen, then overwrites the generated schema with **datamodel-codegen --field-constraints** so schema uses `Field(...)` instead of `constr(...)` (type-checker friendly). No extra script: two CLI calls in the Makefile.
+
+The project includes an example **`openapi.yaml`** (items API) so you can run `make codegen` and inspect `_generated` without changing anything.
+
+### Integrating generated code
+
+The `_generated/` directory is a **staging area** — it never overwrites your actual code. You copy from it once, then own and modify the code. This lets you re-run codegen when the OpenAPI spec changes without losing your implementations.
+
+**Step-by-step workflow:**
+
+#### 1. Copy routes
+
+Copy `_generated/routers/<tag>.py` → `src/app/routes/<tag>.py`
+
+```bash
+cp src/app/_generated/routers/items.py src/app/routes/items.py
+```
+
+The generated files already import from `app.schema.<tag>` and `app.dependencies.<tag>`, so they work as-is under `app/routes/`.
+
+#### 2. Copy and adjust schema
+
+Copy `_generated/schema.py` → `src/app/schema/<tag>.py`
+
+```bash
+cp src/app/_generated/schema.py src/app/schema/items.py
+```
+
+If you use ORM or domain objects, add `model_config` to response models:
+
+```python
+from pydantic import ConfigDict
+
+class ItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    # ... fields
+```
+
+#### 3. Create the supporting layers
+
+The generated routes have `# TODO` placeholders. Before they work, you need:
+
+| Layer | Create | Purpose |
+|-------|--------|---------|
+| Domain | `src/app/domain/<tag>.py` | Internal business models |
+| Repository | `src/app/repositories/<tag>/` | Data access interface + fake impl |
+| Service | `src/app/services/<tag>/` | Business logic |
+| Dependencies | `src/app/dependencies/<tag>.py` | Wire up DI |
+
+See [Adding a New Feature](#adding-a-new-feature) for detailed examples.
+
+#### 4. Register the router
+
+Copy the registration lines from `_generated/router_registration.py` into `main.py`:
+
+```python
+# main.py
+from app.routes.items import router as items_router
+app.include_router(items_router)
+```
+
+#### 5. Implement the route handlers
+
+Replace the `# TODO` placeholders with actual service calls:
+
+```python
+# Before (generated)
+async def get_items(...) -> ItemListResponse:
+    # TODO: call service and return response
+    ...
+
+# After (implemented)
+async def get_items(
+    service: Annotated[ItemService, Depends(get_item_service)],
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 100,
+) -> ItemListResponse:
+    items, total = await service.list_items(skip=skip, limit=limit)
+    return ItemListResponse(
+        items=[ItemResponse.model_validate(i) for i in items],
+        total=total,
+    )
+```
+
+### Re-running codegen
+
+When the OpenAPI spec changes:
+
+1. Run `make codegen` again
+2. Compare `_generated/` with your `routes/` and `schema/` files
+3. Manually merge new endpoints or schema changes
+4. Your implementations remain untouched
+
+This workflow ensures generated code is scaffolding you copy once, not something that overwrites your work.
+
+---
+
+## Writing OpenAPI Specs
+
+A practical guide to writing OpenAPI YAML that works well with this project's codegen and produces clean, usable code.
+
+### Minimal structure
+
+```yaml
+openapi: 3.0.3
+info:
+  title: My API
+  version: 0.1.0
+
+paths:
+  /resources:
+    get:
+      # ...
+    post:
+      # ...
+
+components:
+  schemas:
+    # ...
+```
+
+### Tags drive code organization
+
+**Tags determine how routes are split into files.** Each unique tag becomes one router file.
+
+```yaml
+paths:
+  /users:
+    get:
+      tags: [users]      # → _generated/routers/users.py
+  /orders:
+    get:
+      tags: [orders]     # → _generated/routers/orders.py
+```
+
+**Conventions:**
+- Use plural, lowercase tag names: `users`, `orders`, `items`
+- One tag per endpoint (the first tag is used for file grouping)
+- Tag name should match the resource name in the path
+
+```yaml
+# ✅ Good - tag matches resource
+/items:
+  get:
+    tags: [items]
+
+# ❌ Avoid - mismatched names cause confusion
+/items:
+  get:
+    tags: [inventory]  # Router file won't match path
+```
+
+### Path parameters
+
+Use `{param_name}` in the path and define the parameter:
+
+```yaml
+/users/{user_id}:
+  get:
+    tags: [users]
+    summary: Get user by ID
+    parameters:
+      - name: user_id
+        in: path
+        required: true          # Path params are always required
+        schema:
+          type: string
+```
+
+**Generated code:**
+```python
+async def get_users_user_id(
+    user_id: Annotated[str, Path()],
+    ...
+) -> UserResponse:
+```
+
+**With validation:**
+```yaml
+parameters:
+  - name: user_id
+    in: path
+    required: true
+    schema:
+      type: string
+      minLength: 1
+      maxLength: 36
+      pattern: '^[a-zA-Z0-9-]+$'
+```
+
+### Query parameters
+
+Use for filtering, pagination, and optional modifiers:
+
+```yaml
+/items:
+  get:
+    tags: [items]
+    summary: List items with pagination
+    parameters:
+      - name: skip
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      - name: status
+        in: query
+        description: Filter by status
+        schema:
+          type: string
+          enum: [active, inactive, archived]
+```
+
+**Generated code:**
+```python
+async def get_items(
+    service: Annotated[ItemService, Depends(get_item_service)],
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    status: Annotated[str | None, Query()] = None,
+) -> ItemListResponse:
+```
+
+### Header parameters
+
+Use for authentication, request tracing, and metadata:
+
+```yaml
+/items:
+  get:
+    parameters:
+      - name: X-Request-ID
+        in: header
+        schema:
+          type: string
+      - name: Authorization
+        in: header
+        required: true
+        schema:
+          type: string
+```
+
+**Generated code:**
+```python
+async def get_items(
+    x_request_id: Annotated[str | None, Header(alias="X-Request-ID")] = None,
+    authorization: Annotated[str, Header(alias="Authorization")],
+    ...
+)
+```
+
+### Request bodies
+
+Define in `requestBody` with a schema reference:
+
+```yaml
+/items:
+  post:
+    tags: [items]
+    summary: Create a new item
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CreateItemRequest'
+    responses:
+      '201':
+        description: Created
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ItemResponse'
+```
+
+### Defining schemas
+
+Put all schemas in `components/schemas`. Use clear naming conventions:
+
+```yaml
+components:
+  schemas:
+    # Request schemas - what clients send
+    CreateItemRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 1000
+          nullable: true
+
+    UpdateItemRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          nullable: true
+        description:
+          type: string
+          maxLength: 1000
+          nullable: true
+
+    # Response schemas - what the API returns
+    ItemResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    # List response with pagination
+    ItemListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemResponse'
+        total:
+          type: integer
+```
+
+**Naming conventions:**
+| Pattern | Use for | Example |
+|---------|---------|---------|
+| `Create<Entity>Request` | POST body | `CreateUserRequest` |
+| `Update<Entity>Request` | PATCH/PUT body | `UpdateUserRequest` |
+| `<Entity>Response` | Single item response | `UserResponse` |
+| `<Entity>ListResponse` | Paginated list | `UserListResponse` |
+
+### Field constraints
+
+Add validation directly in the schema — these become `Field()` constraints in Pydantic:
+
+```yaml
+properties:
+  email:
+    type: string
+    format: email
+    maxLength: 255
+  age:
+    type: integer
+    minimum: 0
+    maximum: 150
+  price:
+    type: number
+    exclusiveMinimum: 0    # gt=0 (must be > 0)
+  quantity:
+    type: integer
+    minimum: 1             # ge=1 (must be >= 1)
+  tags:
+    type: array
+    items:
+      type: string
+    maxItems: 10
+  username:
+    type: string
+    pattern: '^[a-z0-9_]+$'
+    minLength: 3
+    maxLength: 20
+```
+
+**Generated Pydantic:**
+```python
+class CreateItemRequest(BaseModel):
+    email: str = Field(..., max_length=255)
+    age: int = Field(..., ge=0, le=150)
+    price: float = Field(..., gt=0)
+    quantity: int = Field(..., ge=1)
+    tags: list[str] = Field(default_factory=list, max_length=10)
+    username: str = Field(..., min_length=3, max_length=20, pattern=r'^[a-z0-9_]+$')
+```
+
+### Common response patterns
+
+**Standard CRUD responses:**
+
+```yaml
+paths:
+  /items:
+    get:
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemListResponse'
+    post:
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemResponse'
+
+  /items/{item_id}:
+    get:
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemResponse'
+    patch:
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemResponse'
+    delete:
+      responses:
+        '204':
+          description: No Content
+```
+
+### Nullable vs optional
+
+- **`nullable: true`** — field can be `null` in JSON
+- **Not in `required`** — field can be omitted entirely
+
+```yaml
+CreateItemRequest:
+  type: object
+  required: [name]          # name is required, description is optional
+  properties:
+    name:
+      type: string
+    description:
+      type: string
+      nullable: true        # Can be null OR omitted
+```
+
+For update requests, make all fields optional and nullable:
+
+```yaml
+UpdateItemRequest:
+  type: object
+  properties:               # No 'required' - all optional
+    name:
+      type: string
+      nullable: true
+    description:
+      type: string
+      nullable: true
+```
+
+### Enums
+
+Use for fixed sets of values:
+
+```yaml
+components:
+  schemas:
+    OrderStatus:
+      type: string
+      enum: [pending, confirmed, shipped, delivered, cancelled]
+
+    Order:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+```
+
+### Complete example
+
+Here's a full example for a typical resource:
+
+```yaml
+openapi: 3.0.3
+info:
+  title: Products API
+  version: 0.1.0
+
+paths:
+  /products:
+    get:
+      tags: [products]
+      summary: List products
+      parameters:
+        - name: skip
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: category
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductListResponse'
+
+    post:
+      tags: [products]
+      summary: Create product
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProductRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+
+  /products/{product_id}:
+    get:
+      tags: [products]
+      summary: Get product
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+
+    patch:
+      tags: [products]
+      summary: Update product
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProductRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+
+    delete:
+      tags: [products]
+      summary: Delete product
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: No Content
+
+components:
+  schemas:
+    CreateProductRequest:
+      type: object
+      required: [name, price]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 255 }
+        description: { type: string, maxLength: 2000, nullable: true }
+        price: { type: number, exclusiveMinimum: 0 }
+        category: { type: string, maxLength: 100, nullable: true }
+
+    UpdateProductRequest:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 255, nullable: true }
+        description: { type: string, maxLength: 2000, nullable: true }
+        price: { type: number, exclusiveMinimum: 0, nullable: true }
+        category: { type: string, maxLength: 100, nullable: true }
+        is_active: { type: boolean, nullable: true }
+
+    ProductResponse:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        price: { type: number }
+        category: { type: string, nullable: true }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time, nullable: true }
+
+    ProductListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductResponse'
+        total: { type: integer }
+```
+
+### Quick reference
+
+| OpenAPI | Python/Pydantic | Notes |
+|---------|-----------------|-------|
+| `type: string` | `str` | |
+| `type: integer` | `int` | |
+| `type: number` | `float` | |
+| `type: boolean` | `bool` | |
+| `type: array` | `list[T]` | |
+| `format: date-time` | `datetime` | |
+| `format: date` | `date` | |
+| `format: email` | `str` | Pydantic validates |
+| `minimum: N` | `Field(ge=N)` | >= N |
+| `maximum: N` | `Field(le=N)` | <= N |
+| `exclusiveMinimum: N` | `Field(gt=N)` | > N |
+| `exclusiveMaximum: N` | `Field(lt=N)` | < N |
+| `minLength: N` | `Field(min_length=N)` | |
+| `maxLength: N` | `Field(max_length=N)` | |
+| `pattern: regex` | `Field(pattern=regex)` | |
+| `nullable: true` | `T \| None` | |
+| `default: value` | `= value` | |
 
 ---
 
